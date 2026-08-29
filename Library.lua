@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v1.7
+-- Rayflare by Vhyse | v1.8
 
 local Rayflare = {
     Settings = {
@@ -17,6 +17,9 @@ local Rayflare = {
         TriggerBot = {
             Enabled = false,
             Mode = "Camera",
+            TriggerKey = Enum.UserInputType.MouseButton2,
+            TriggerMode = "Hold",
+            IsAiming = false,
             Delay = 0.05,
             WallCheck = {
                 Enabled = true
@@ -147,6 +150,10 @@ end
 local lastTrigger = 0
 local function CheckTriggerBot(mousePos)
     if not Rayflare.Settings.TriggerBot.Enabled then return end
+    
+    local shouldAim = (Rayflare.Settings.TriggerBot.TriggerMode == "Always") or Rayflare.Settings.TriggerBot.IsAiming
+    if not shouldAim then return end
+    
     if os.clock() - lastTrigger < Rayflare.Settings.TriggerBot.Delay then return end
 
     local origin, direction
@@ -180,6 +187,7 @@ local function CheckTriggerBot(mousePos)
 
     local result = Workspace:Raycast(origin, direction, triggerRayParams)
 
+    -- If ray hits any part of a character model
     if result and result.Instance then
         local targetCharacter = result.Instance:FindFirstAncestorOfClass("Model")
         if targetCharacter then
@@ -206,23 +214,37 @@ function Rayflare:Load()
     self.Connections.InputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed or not self.Settings.Enabled then return end
 
-        local isTriggerKey = (input.UserInputType == self.Settings.Trigger.TriggerKey) or (input.KeyCode == self.Settings.Trigger.TriggerKey)
-        
-        if isTriggerKey then
+        local isAimKey = (input.UserInputType == self.Settings.Trigger.TriggerKey) or (input.KeyCode == self.Settings.Trigger.TriggerKey)
+        if isAimKey then
             if self.Settings.Trigger.TriggerMode == "Toggle" then
                 self.Settings.Trigger.IsAiming = not self.Settings.Trigger.IsAiming
             elseif self.Settings.Trigger.TriggerMode == "Hold" then
                 self.Settings.Trigger.IsAiming = true
             end
         end
+        
+        local isTriggerBotKey = (input.UserInputType == self.Settings.TriggerBot.TriggerKey) or (input.KeyCode == self.Settings.TriggerBot.TriggerKey)
+        if isTriggerBotKey and self.Settings.TriggerBot.Enabled then
+            if self.Settings.TriggerBot.TriggerMode == "Toggle" then
+                self.Settings.TriggerBot.IsAiming = not self.Settings.TriggerBot.IsAiming
+            elseif self.Settings.TriggerBot.TriggerMode == "Hold" then
+                self.Settings.TriggerBot.IsAiming = true
+            end
+        end
     end)
 
     self.Connections.InputEnded = UserInputService.InputEnded:Connect(function(input)
-        local isTriggerKey = (input.UserInputType == self.Settings.Trigger.TriggerKey) or (input.KeyCode == self.Settings.Trigger.TriggerKey)
-        
-        if isTriggerKey then
+        local isAimKey = (input.UserInputType == self.Settings.Trigger.TriggerKey) or (input.KeyCode == self.Settings.Trigger.TriggerKey)
+        if isAimKey then
             if self.Settings.Trigger.TriggerMode == "Hold" then
                 self.Settings.Trigger.IsAiming = false
+            end
+        end
+        
+        local isTriggerBotKey = (input.UserInputType == self.Settings.TriggerBot.TriggerKey) or (input.KeyCode == self.Settings.TriggerBot.TriggerKey)
+        if isTriggerBotKey and self.Settings.TriggerBot.Enabled then
+            if self.Settings.TriggerBot.TriggerMode == "Hold" then
+                self.Settings.TriggerBot.IsAiming = false
             end
         end
     end)
@@ -249,13 +271,13 @@ function Rayflare:Load()
         if not self.Settings.Enabled then 
             self.CurrentTarget = nil
             self.Settings.Trigger.IsAiming = false
+            self.Settings.TriggerBot.IsAiming = false
             return 
         end
 
         CheckTriggerBot(mousePos)
 
         local shouldAim = (self.Settings.Trigger.TriggerMode == "Always") or self.Settings.Trigger.IsAiming
-        
         if not shouldAim then
             self.CurrentTarget = nil
             return
@@ -333,6 +355,7 @@ function Rayflare:Unload()
     
     self.CurrentTarget = nil
     self.Settings.Trigger.IsAiming = false
+    self.Settings.TriggerBot.IsAiming = false
     print("[ Rayflare ] Engine unloaded and memory cleared.")
 end
 
