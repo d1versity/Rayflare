@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v1.8
+-- Rayflare by Vhyse | v1.9
 
 local Rayflare = {
     Settings = {
@@ -59,6 +59,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -158,10 +159,12 @@ local function CheckTriggerBot(mousePos)
 
     local origin, direction
     if Rayflare.Settings.TriggerBot.Mode == "Camera" then
-        origin = Camera.CFrame.Position
-        direction = Camera.CFrame.LookVector * 1000
+        local viewportSize = Camera.ViewportSize
+        local ray = Camera:ViewportPointToRay(viewportSize.X / 2, viewportSize.Y / 2)
+        origin = ray.Origin
+        direction = ray.Direction * 1000
     elseif Rayflare.Settings.TriggerBot.Mode == "Cursor" then
-        local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+        local ray = Camera:ScreenPointToRay(mousePos.X, mousePos.Y)
         origin = ray.Origin
         direction = ray.Direction * 1000
     else
@@ -187,7 +190,6 @@ local function CheckTriggerBot(mousePos)
 
     local result = Workspace:Raycast(origin, direction, triggerRayParams)
 
-    -- If ray hits any part of a character model
     if result and result.Instance then
         local targetCharacter = result.Instance:FindFirstAncestorOfClass("Model")
         if targetCharacter then
@@ -195,13 +197,10 @@ local function CheckTriggerBot(mousePos)
             if player and player ~= LocalPlayer then
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
-                    if mouse1click then
-                        mouse1click()
-                        lastTrigger = os.clock()
-                    else
-                        warn("[ Rayflare ] 'mouse1click' is not supported by your executor. Triggerbot will not work.")
-                        Rayflare.Settings.TriggerBot.Enabled = false
-                    end
+                    VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 1)
+                    task.wait(0.01)
+                    VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 1)
+                    lastTrigger = os.clock()
                 end
             end
         end
