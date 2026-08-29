@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.2
+-- Rayflare by Vhyse | v2.3
 
 local Rayflare = {
     Settings = {
@@ -21,7 +21,6 @@ local Rayflare = {
             TriggerMode = "Hold",
             IsAiming = false,
             Delay = 0,
-            CPS = 10,
             WallCheck = {
                 Enabled = true
             }
@@ -151,15 +150,7 @@ local function GetPredictedPosition(targetPart)
     return pos
 end
 
-local function executeShoot()
-    if mouse1press then pcall(mouse1press) end
-    if mouse1release then pcall(mouse1release) end
-    if mouse1click then pcall(mouse1click) end
-end
-
 local lastTrigger = 0
-local isWaitingToTrigger = false
-
 local function CheckTriggerBot(mousePos)
     if not Rayflare.Settings.TriggerBot.Enabled then return end
     
@@ -207,22 +198,11 @@ local function CheckTriggerBot(mousePos)
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
                     
-                    local currentRate = 1 / math.max(1, Rayflare.Settings.TriggerBot.CPS)
-                    if tick() - lastTrigger >= currentRate then
-                        if Rayflare.Settings.TriggerBot.Delay > 0 then
-                            if not isWaitingToTrigger then
-                                isWaitingToTrigger = true
-                                task.spawn(function()
-                                    task.wait(Rayflare.Settings.TriggerBot.Delay)
-                                    lastTrigger = tick()
-                                    executeShoot()
-                                    isWaitingToTrigger = false
-                                end)
-                            end
-                        else
-                            lastTrigger = tick()
-                            executeShoot()
-                        end
+                    if tick() - lastTrigger >= Rayflare.Settings.TriggerBot.Delay then
+                        lastTrigger = tick()
+                        if mouse1press then pcall(mouse1press) end
+                        if mouse1release then pcall(mouse1release) end
+                        if mouse1click then pcall(mouse1click) end
                     end
                     
                 end
