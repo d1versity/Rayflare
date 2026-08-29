@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.0
+-- Rayflare by Vhyse | v2.1
 
 local Rayflare = {
     Settings = {
@@ -59,7 +59,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -69,7 +68,8 @@ if Drawing then
     Rayflare.FOVCircle.Thickness = 1.5
     Rayflare.FOVCircle.Filled = false
     Rayflare.FOVCircle.Transparency = 1
-    Rayflare.FOVCircle.Visible = false -- FIX: Hides the executor's default UI label at 0,0 instantly
+    Rayflare.FOVCircle.Visible = false
+    Rayflare.FOVCircle.Position = Vector2.new(-9999, -9999) -- Forces it off-screen on inject
 else
     warn("[ Rayflare ] Executor does not support Drawing API. FOV Circle will not render.")
 end
@@ -198,10 +198,16 @@ local function CheckTriggerBot(mousePos)
             if player and player ~= LocalPlayer then
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
-                    VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, true, game, 1)
-                    task.wait(0.01)
-                    VirtualInputManager:SendMouseButtonEvent(mousePos.X, mousePos.Y, 0, false, game, 1)
                     lastTrigger = os.clock()
+                    task.spawn(function()
+                        if mouse1click then
+                            mouse1click()
+                        elseif mouse1press and mouse1release then
+                            mouse1press()
+                            task.wait(0.01)
+                            mouse1release()
+                        end
+                    end)
                 end
             end
         end
@@ -265,6 +271,7 @@ function Rayflare:Load()
                 end
             else
                 self.FOVCircle.Visible = false
+                self.FOVCircle.Position = Vector2.new(-9999, -9999) 
             end
         end
 
