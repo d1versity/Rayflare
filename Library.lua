@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.1
+-- Rayflare by Vhyse | v2.2
 
 local Rayflare = {
     Settings = {
@@ -20,7 +20,8 @@ local Rayflare = {
             TriggerKey = Enum.UserInputType.MouseButton2,
             TriggerMode = "Hold",
             IsAiming = false,
-            Delay = 0.05,
+            Delay = 0,
+            CPS = 10,
             WallCheck = {
                 Enabled = true
             }
@@ -67,9 +68,10 @@ if Drawing then
     Rayflare.FOVCircle = Drawing.new("Circle")
     Rayflare.FOVCircle.Thickness = 1.5
     Rayflare.FOVCircle.Filled = false
-    Rayflare.FOVCircle.Transparency = 1
+    Rayflare.FOVCircle.Transparency = 0
     Rayflare.FOVCircle.Visible = false
-    Rayflare.FOVCircle.Position = Vector2.new(-9999, -9999) -- Forces it off-screen on inject
+    Rayflare.FOVCircle.Radius = 0
+    Rayflare.FOVCircle.Position = Vector2.new(-9999, -9999) 
 else
     warn("[ Rayflare ] Executor does not support Drawing API. FOV Circle will not render.")
 end
@@ -149,15 +151,21 @@ local function GetPredictedPosition(targetPart)
     return pos
 end
 
+local function executeShoot()
+    if mouse1press then pcall(mouse1press) end
+    if mouse1release then pcall(mouse1release) end
+    if mouse1click then pcall(mouse1click) end
+end
+
 local lastTrigger = 0
+local isWaitingToTrigger = false
+
 local function CheckTriggerBot(mousePos)
     if not Rayflare.Settings.TriggerBot.Enabled then return end
     
     local shouldAim = (Rayflare.Settings.TriggerBot.TriggerMode == "Always") or Rayflare.Settings.TriggerBot.IsAiming
     if not shouldAim then return end
     
-    if os.clock() - lastTrigger < Rayflare.Settings.TriggerBot.Delay then return end
-
     local origin, direction
     if Rayflare.Settings.TriggerBot.Mode == "Camera" then
         local viewportSize = Camera.ViewportSize
@@ -198,16 +206,25 @@ local function CheckTriggerBot(mousePos)
             if player and player ~= LocalPlayer then
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
-                    lastTrigger = os.clock()
-                    task.spawn(function()
-                        if mouse1click then
-                            mouse1click()
-                        elseif mouse1press and mouse1release then
-                            mouse1press()
-                            task.wait(0.01)
-                            mouse1release()
+                    
+                    local currentRate = 1 / math.max(1, Rayflare.Settings.TriggerBot.CPS)
+                    if tick() - lastTrigger >= currentRate then
+                        if Rayflare.Settings.TriggerBot.Delay > 0 then
+                            if not isWaitingToTrigger then
+                                isWaitingToTrigger = true
+                                task.spawn(function()
+                                    task.wait(Rayflare.Settings.TriggerBot.Delay)
+                                    lastTrigger = tick()
+                                    executeShoot()
+                                    isWaitingToTrigger = false
+                                end)
+                            end
+                        else
+                            lastTrigger = tick()
+                            executeShoot()
                         end
-                    end)
+                    end
+                    
                 end
             end
         end
@@ -261,6 +278,7 @@ function Rayflare:Load()
         if self.FOVCircle then
             if self.Settings.Enabled and self.Settings.FOV.Visible then
                 self.FOVCircle.Visible = true
+                self.FOVCircle.Transparency = 1
                 self.FOVCircle.Radius = self.Settings.FOV.Radius
                 self.FOVCircle.Position = mousePos
                 
@@ -271,6 +289,8 @@ function Rayflare:Load()
                 end
             else
                 self.FOVCircle.Visible = false
+                self.FOVCircle.Radius = 0
+                self.FOVCircle.Transparency = 0
                 self.FOVCircle.Position = Vector2.new(-9999, -9999) 
             end
         end
