@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v1.9
+-- Rayflare by Vhyse | v2.0
 
 local Rayflare = {
     Settings = {
@@ -69,6 +69,7 @@ if Drawing then
     Rayflare.FOVCircle.Thickness = 1.5
     Rayflare.FOVCircle.Filled = false
     Rayflare.FOVCircle.Transparency = 1
+    Rayflare.FOVCircle.Visible = false -- FIX: Hides the executor's default UI label at 0,0 instantly
 else
     warn("[ Rayflare ] Executor does not support Drawing API. FOV Circle will not render.")
 end
