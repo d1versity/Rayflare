@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v1.6
+-- Rayflare by Vhyse | v1.7
 
 local Rayflare = {
     Settings = {
@@ -12,6 +12,15 @@ local Rayflare = {
             TriggerKey = Enum.UserInputType.MouseButton2, 
             TriggerMode = "Hold", 
             IsAiming = false 
+        },
+        
+        TriggerBot = {
+            Enabled = false,
+            Mode = "Camera",
+            Delay = 0.05,
+            WallCheck = {
+                Enabled = true
+            }
         },
 
         FOV = {
@@ -135,6 +144,62 @@ local function GetPredictedPosition(targetPart)
     return pos
 end
 
+local lastTrigger = 0
+local function CheckTriggerBot(mousePos)
+    if not Rayflare.Settings.TriggerBot.Enabled then return end
+    if os.clock() - lastTrigger < Rayflare.Settings.TriggerBot.Delay then return end
+
+    local origin, direction
+    if Rayflare.Settings.TriggerBot.Mode == "Camera" then
+        origin = Camera.CFrame.Position
+        direction = Camera.CFrame.LookVector * 1000
+    elseif Rayflare.Settings.TriggerBot.Mode == "Cursor" then
+        local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+        origin = ray.Origin
+        direction = ray.Direction * 1000
+    else
+        return
+    end
+
+    local triggerRayParams = RaycastParams.new()
+    triggerRayParams.IgnoreWater = true
+
+    if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
+        triggerRayParams.FilterType = Enum.RaycastFilterType.Exclude
+        triggerRayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    else
+        triggerRayParams.FilterType = Enum.RaycastFilterType.Include
+        local characters = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                table.insert(characters, player.Character)
+            end
+        end
+        triggerRayParams.FilterDescendantsInstances = characters
+    end
+
+    local result = Workspace:Raycast(origin, direction, triggerRayParams)
+
+    if result and result.Instance then
+        local targetCharacter = result.Instance:FindFirstAncestorOfClass("Model")
+        if targetCharacter then
+            local player = Players:GetPlayerFromCharacter(targetCharacter)
+            if player and player ~= LocalPlayer then
+                local humanoid = targetCharacter:FindFirstChild("Humanoid")
+                if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
+                    if mouse1click then
+                        mouse1click()
+                        lastTrigger = os.clock()
+                    else
+                        warn("[ Rayflare ] 'mouse1click' is not supported by your executor. Triggerbot will not work.")
+                        Rayflare.Settings.TriggerBot.Enabled = false
+                    end
+                end
+            end
+        end
+    end
+end
+
 function Rayflare:Load()
     if self.Connections.RenderLoop then return end 
     
@@ -186,6 +251,8 @@ function Rayflare:Load()
             self.Settings.Trigger.IsAiming = false
             return 
         end
+
+        CheckTriggerBot(mousePos)
 
         local shouldAim = (self.Settings.Trigger.TriggerMode == "Always") or self.Settings.Trigger.IsAiming
         
