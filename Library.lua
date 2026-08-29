@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.3
+-- Rayflare by Vhyse | v2.4
 
 local Rayflare = {
     Settings = {
@@ -215,10 +215,10 @@ function Rayflare:Load()
     if self.Connections.RenderLoop then return end 
     
     self.Connections.InputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed or not self.Settings.Enabled then return end
+        if gameProcessed then return end
 
         local isAimKey = (input.UserInputType == self.Settings.Trigger.TriggerKey) or (input.KeyCode == self.Settings.Trigger.TriggerKey)
-        if isAimKey then
+        if isAimKey and self.Settings.Enabled then
             if self.Settings.Trigger.TriggerMode == "Toggle" then
                 self.Settings.Trigger.IsAiming = not self.Settings.Trigger.IsAiming
             elseif self.Settings.Trigger.TriggerMode == "Hold" then
@@ -245,7 +245,7 @@ function Rayflare:Load()
         end
         
         local isTriggerBotKey = (input.UserInputType == self.Settings.TriggerBot.TriggerKey) or (input.KeyCode == self.Settings.TriggerBot.TriggerKey)
-        if isTriggerBotKey and self.Settings.TriggerBot.Enabled then
+        if isTriggerBotKey then
             if self.Settings.TriggerBot.TriggerMode == "Hold" then
                 self.Settings.TriggerBot.IsAiming = false
             end
@@ -275,14 +275,14 @@ function Rayflare:Load()
             end
         end
 
+        -- Triggerbot logic now runs entirely independent of Legitbot's master switch
+        CheckTriggerBot(mousePos)
+
         if not self.Settings.Enabled then 
             self.CurrentTarget = nil
             self.Settings.Trigger.IsAiming = false
-            self.Settings.TriggerBot.IsAiming = false
             return 
         end
-
-        CheckTriggerBot(mousePos)
 
         local shouldAim = (self.Settings.Trigger.TriggerMode == "Always") or self.Settings.Trigger.IsAiming
         if not shouldAim then
