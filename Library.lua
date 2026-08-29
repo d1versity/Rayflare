@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.4
+-- Rayflare by Vhyse | v2.5
 
 local Rayflare = {
     Settings = {
@@ -21,8 +21,18 @@ local Rayflare = {
             TriggerMode = "Hold",
             IsAiming = false,
             Delay = 0,
+            TeamCheck = {
+                Enabled = false
+            },
             WallCheck = {
-                Enabled = true
+                Enabled = false
+            }
+        },
+
+        Movement = {
+            Bhop = {
+                Enabled = false,
+                Speed = 30
             }
         },
 
@@ -78,12 +88,6 @@ end
 Rayflare.RayParams.FilterType = Enum.RaycastFilterType.Exclude
 Rayflare.RayParams.IgnoreWater = true
 
-local function IsTeamIgnored(player)
-    if not Rayflare.Settings.TeamCheck.Enabled then return false end
-    if not LocalPlayer.Team then return false end
-    return player.Team == LocalPlayer.Team
-end
-
 local function CheckVisibility(targetPart, character)
     if not Rayflare.Settings.WallCheck.Enabled then return true end
     if not LocalPlayer.Character then return false end
@@ -102,7 +106,10 @@ local function IsValidTarget(player, mousePos)
     local humanoid = player.Character:FindFirstChild("Humanoid")
     
     if not targetPart or not humanoid or humanoid.Health <= 0 then return false end
-    if IsTeamIgnored(player) then return false end
+    
+    if Rayflare.Settings.TeamCheck.Enabled and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
+        return false 
+    end
     
     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
     if not onScreen then return false end
@@ -195,16 +202,19 @@ local function CheckTriggerBot(mousePos)
         if targetCharacter then
             local player = Players:GetPlayerFromCharacter(targetCharacter)
             if player and player ~= LocalPlayer then
+                
+                if Rayflare.Settings.TriggerBot.TeamCheck.Enabled and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+                    return
+                end
+
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
-                if humanoid and humanoid.Health > 0 and not IsTeamIgnored(player) then
-                    
+                if humanoid and humanoid.Health > 0 then
                     if tick() - lastTrigger >= Rayflare.Settings.TriggerBot.Delay then
                         lastTrigger = tick()
                         if mouse1press then pcall(mouse1press) end
                         if mouse1release then pcall(mouse1release) end
                         if mouse1click then pcall(mouse1click) end
                     end
-                    
                 end
             end
         end
@@ -275,8 +285,24 @@ function Rayflare:Load()
             end
         end
 
-        -- Triggerbot logic now runs entirely independent of Legitbot's master switch
         CheckTriggerBot(mousePos)
+
+        if self.Settings.Movement.Bhop.Enabled then
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChild("Humanoid")
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hum and hrp and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                if hum.FloorMaterial ~= Enum.Material.Air then
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+                
+                local moveDir = hum.MoveDirection
+                if moveDir.Magnitude > 0 then
+                    local currentVel = hrp.AssemblyLinearVelocity
+                    hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * self.Settings.Movement.Bhop.Speed, currentVel.Y, moveDir.Z * self.Settings.Movement.Bhop.Speed)
+                end
+            end
+        end
 
         if not self.Settings.Enabled then 
             self.CurrentTarget = nil
