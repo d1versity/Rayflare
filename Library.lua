@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.5
+-- Rayflare by Vhyse | v2.6
 
 local Rayflare = {
     Settings = {
@@ -26,13 +26,6 @@ local Rayflare = {
             },
             WallCheck = {
                 Enabled = false
-            }
-        },
-
-        Movement = {
-            Bhop = {
-                Enabled = false,
-                Speed = 30
             }
         },
 
@@ -286,23 +279,6 @@ function Rayflare:Load()
         end
 
         CheckTriggerBot(mousePos)
-
-        if self.Settings.Movement.Bhop.Enabled then
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChild("Humanoid")
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hum and hrp and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                if hum.FloorMaterial ~= Enum.Material.Air then
-                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
-                
-                local moveDir = hum.MoveDirection
-                if moveDir.Magnitude > 0 then
-                    local currentVel = hrp.AssemblyLinearVelocity
-                    hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * self.Settings.Movement.Bhop.Speed, currentVel.Y, moveDir.Z * self.Settings.Movement.Bhop.Speed)
-                end
-            end
-        end
 
         if not self.Settings.Enabled then 
             self.CurrentTarget = nil
