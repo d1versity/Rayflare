@@ -49,13 +49,21 @@ local Rayflare = {
             X = 0.1,
             Y = 0.1,
             Dynamic = false
+        },
+        
+        Flick = {
+            Enabled = true
         }
     },
     
     Connections = {},
     CurrentTarget = nil,
     FOVCircle = nil,
-    RayParams = RaycastParams.new()
+    RayParams = RaycastParams.new(),
+    
+    -- Flick tracking variables
+    wasAiming = false,
+    savedCameraCFrame = nil
 }
 
 local Players = game:GetService("Players")
@@ -86,9 +94,20 @@ local function CheckVisibility(targetPart, character)
     if not LocalPlayer.Character then return false end
     
     local origin = Camera.CFrame.Position
-    Rayflare.RayParams.FilterDescendantsInstances = {LocalPlayer.Character, character}
+    local direction = targetPart.Position - origin
+    local ignoreList = {LocalPlayer.Character, character}
     
-    local result = Workspace:Raycast(origin, targetPart.Position - origin, Rayflare.RayParams)
+    Rayflare.RayParams.FilterDescendantsInstances = ignoreList
+    
+    local result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
+    
+    -- Ignore parts we cannot collide with
+    while result and not result.Instance.CanCollide do
+        table.insert(ignoreList, result.Instance)
+        Rayflare.RayParams.FilterDescendantsInstances = ignoreList
+        result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
+    end
+    
     return not result
 end
 
@@ -173,10 +192,21 @@ local function CheckTriggerBot(mousePos)
 
     local triggerRayParams = RaycastParams.new()
     triggerRayParams.IgnoreWater = true
+    local result = nil
 
     if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
         triggerRayParams.FilterType = Enum.RaycastFilterType.Exclude
-        triggerRayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+        local ignoreList = {LocalPlayer.Character, Camera}
+        triggerRayParams.FilterDescendantsInstances = ignoreList
+        
+        result = Workspace:Raycast(origin, direction, triggerRayParams)
+        
+        -- Ignore parts we cannot collide with
+        while result and not result.Instance.CanCollide do
+            table.insert(ignoreList, result.Instance)
+            triggerRayParams.FilterDescendantsInstances = ignoreList
+            result = Workspace:Raycast(origin, direction, triggerRayParams)
+        end
     else
         triggerRayParams.FilterType = Enum.RaycastFilterType.Include
         local characters = {}
@@ -186,9 +216,8 @@ local function CheckTriggerBot(mousePos)
             end
         end
         triggerRayParams.FilterDescendantsInstances = characters
+        result = Workspace:Raycast(origin, direction, triggerRayParams)
     end
-
-    local result = Workspace:Raycast(origin, direction, triggerRayParams)
 
     if result and result.Instance then
         local targetCharacter = result.Instance:FindFirstAncestorOfClass("Model")
@@ -283,15 +312,28 @@ function Rayflare:Load()
         if not self.Settings.Enabled then 
             self.CurrentTarget = nil
             self.Settings.Trigger.IsAiming = false
+            self.wasAiming = false
+            self.savedCameraCFrame = nil
             return 
         end
 
         local shouldAim = (self.Settings.Trigger.TriggerMode == "Always") or self.Settings.Trigger.IsAiming
+        
+        -- Reset mechanism for Flick
         if not shouldAim then
+            if self.wasAiming then
+                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
+                    Camera.CFrame = self.savedCameraCFrame
+                end
+                self.wasAiming = false
+                self.savedCameraCFrame = nil
+            end
+            
             self.CurrentTarget = nil
             return
         end
 
+        -- Find Target
         if self.Settings.TargetLock and self.CurrentTarget then
             local isValid = IsValidTarget(self.CurrentTarget, mousePos)
             if not isValid then
@@ -302,6 +344,12 @@ function Rayflare:Load()
         end
         
         if self.CurrentTarget and self.CurrentTarget.Character then
+            -- Save camera position right before the lock initiates
+            if not self.wasAiming then
+                self.savedCameraCFrame = Camera.CFrame
+                self.wasAiming = true
+            end
+            
             local targetPart = self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
             if not targetPart then return end
             
@@ -343,6 +391,15 @@ function Rayflare:Load()
                     self.Settings.AimType = "Camera" 
                 end
             end
+        else
+            -- If user is holding aim but the target drops behind a wall, trigger flick return
+            if self.wasAiming then
+                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
+                    Camera.CFrame = self.savedCameraCFrame
+                end
+                self.wasAiming = false
+                self.savedCameraCFrame = nil
+            end
         end
     end)
     
@@ -363,6 +420,8 @@ function Rayflare:Unload()
     end
     
     self.CurrentTarget = nil
+    self.wasAiming = false
+    self.savedCameraCFrame = nil
     self.Settings.Trigger.IsAiming = false
     self.Settings.TriggerBot.IsAiming = false
     print("[ Rayflare ] Engine unloaded and memory cleared.")
