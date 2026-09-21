@@ -35,6 +35,10 @@ MainTab:CreateToggle("Target Lock-On", Rayflare.Settings.TargetLock, function(st
     Rayflare.Settings.TargetLock = state
 end)
 
+MainTab:CreateToggle("Enable Flick", Rayflare.Settings.Flick.Enabled, function(state)
+    Rayflare.Settings.Flick.Enabled = state
+end)
+
 -- ========================================== --
 --             TRIGGER & FOV                  --
 -- ========================================== --
