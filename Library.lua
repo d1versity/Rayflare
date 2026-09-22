@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.6
+-- Rayflare by Vhyse | v2.8
 
 local Rayflare = {
     Settings = {
@@ -33,7 +33,8 @@ local Rayflare = {
             Visible = true,
             Radius = 150,
             Color = Color3.fromRGB(255, 255, 255),
-            Chroma = false
+            Chroma = false,
+            Full360 = false -- 360 Degree FOV Switch
         },
         
         TeamCheck = {
@@ -44,6 +45,11 @@ local Rayflare = {
             Enabled = false
         },
         
+        AutoWall = {
+            Enabled = false,
+            MaxThickness = 2 
+        },
+        
         Prediction = {
             Enabled = false,
             X = 0.1,
@@ -52,7 +58,7 @@ local Rayflare = {
         },
         
         Flick = {
-            Enabled = true
+            Enabled = false
         }
     },
     
@@ -60,8 +66,8 @@ local Rayflare = {
     CurrentTarget = nil,
     FOVCircle = nil,
     RayParams = RaycastParams.new(),
+    RevRayParams = RaycastParams.new(),
     
-    -- Flick tracking variables
     wasAiming = false,
     savedCameraCFrame = nil
 }
@@ -89,26 +95,75 @@ end
 Rayflare.RayParams.FilterType = Enum.RaycastFilterType.Exclude
 Rayflare.RayParams.IgnoreWater = true
 
+Rayflare.RevRayParams.FilterType = Enum.RaycastFilterType.Exclude
+Rayflare.RevRayParams.IgnoreWater = true
+
+-- Reusable buffer table to avoid GC overhead
+local sharedIgnoreList = {}
+
 local function CheckVisibility(targetPart, character)
     if not Rayflare.Settings.WallCheck.Enabled then return true end
     if not LocalPlayer.Character then return false end
     
     local origin = Camera.CFrame.Position
     local direction = targetPart.Position - origin
-    local ignoreList = {LocalPlayer.Character, character}
     
-    Rayflare.RayParams.FilterDescendantsInstances = ignoreList
+    -- Fast buffer clear
+    table.clear(sharedIgnoreList)
+    sharedIgnoreList[1] = LocalPlayer.Character
+    sharedIgnoreList[2] = character
     
+    Rayflare.RayParams.FilterDescendantsInstances = sharedIgnoreList
     local result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
     
-    -- Ignore parts we cannot collide with
-    while result and not result.Instance.CanCollide do
-        table.insert(ignoreList, result.Instance)
-        Rayflare.RayParams.FilterDescendantsInstances = ignoreList
+    -- Filter non-collidable parts quickly
+    local safety = 0
+    while result and not result.Instance.CanCollide and safety < 10 do
+        safety = safety + 1
+        table.insert(sharedIgnoreList, result.Instance)
+        Rayflare.RayParams.FilterDescendantsInstances = sharedIgnoreList
         result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
     end
     
-    return not result
+    -- Front ray hit a solid wall
+    if result then
+        if Rayflare.Settings.AutoWall and Rayflare.Settings.AutoWall.Enabled then
+            local maxThick = Rayflare.Settings.AutoWall.MaxThickness
+            local dirUnit = direction.Unit
+            
+            -- Early exit test: sample max penetration depth ahead of the front hit
+            local samplePos = result.Position + (dirUnit * (maxThick + 0.05))
+            local distToTarget = (targetPart.Position - result.Position).Magnitude
+            
+            -- If the target is closer than the wall penetration sample, target is inside the wall
+            if distToTarget < maxThick then
+                samplePos = targetPart.Position
+            end
+            
+            -- Cast backwards from sample point toward the front hit
+            Rayflare.RevRayParams.FilterDescendantsInstances = sharedIgnoreList
+            local revDir = result.Position - samplePos
+            local revResult = Workspace:Raycast(samplePos, revDir, Rayflare.RevRayParams)
+            
+            local revSafety = 0
+            while revResult and not revResult.Instance.CanCollide and revSafety < 10 do
+                revSafety = revSafety + 1
+                table.insert(sharedIgnoreList, revResult.Instance)
+                Rayflare.RevRayParams.FilterDescendantsInstances = sharedIgnoreList
+                revResult = Workspace:Raycast(samplePos, revDir, Rayflare.RevRayParams)
+            end
+            
+            if revResult then
+                local thickness = (result.Position - revResult.Position).Magnitude
+                if thickness <= maxThick then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    
+    return true
 end
 
 local function IsValidTarget(player, mousePos)
@@ -123,21 +178,28 @@ local function IsValidTarget(player, mousePos)
         return false 
     end
     
+    -- 360 Degree FOV Evaluation
+    if Rayflare.Settings.FOV.Full360 then
+        -- In 360 FOV, calculate direct world distance from the camera
+        local dist3D = (targetPart.Position - Camera.CFrame.Position).Magnitude
+        return true, dist3D, targetPart
+    end
+    
+    -- Standard 2D Viewport Evaluation
     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
     if not onScreen then return false end
     
     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
     if dist > Rayflare.Settings.FOV.Radius then return false end
     
-    if not CheckVisibility(targetPart, player.Character) then return false end
-    
     return true, dist, targetPart
 end
 
 local function GetClosestTarget(mousePos)
     local closestPlayer = nil
-    local shortestDistance = Rayflare.Settings.FOV.Radius
+    local shortestDistance = math.huge
 
+    -- 1. Cheap loop: Find candidate by distance only
     for _, player in ipairs(Players:GetPlayers()) do
         local isValid, dist = IsValidTarget(player, mousePos)
         if isValid and dist < shortestDistance then
@@ -146,14 +208,22 @@ local function GetClosestTarget(mousePos)
         end
     end
     
-    return closestPlayer
+    -- 2. Expensive check: Only raycast against the single closest candidate
+    if closestPlayer and closestPlayer.Character then
+        local targetPart = closestPlayer.Character:FindFirstChild(Rayflare.Settings.AimPart)
+        if targetPart and CheckVisibility(targetPart, closestPlayer.Character) then
+            return closestPlayer
+        end
+    end
+    
+    return nil
 end
 
 local function GetPredictedPosition(targetPart)
     local pos = targetPart.Position
     
     if Rayflare.Settings.Prediction.Enabled then
-        local velocity = targetPart.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
+        local velocity = targetPart.AssemblyLinearVelocity or Vector3.zero
         local predX, predY = Rayflare.Settings.Prediction.X, Rayflare.Settings.Prediction.Y
         
         if Rayflare.Settings.Prediction.Dynamic then
@@ -190,34 +260,19 @@ local function CheckTriggerBot(mousePos)
         return
     end
 
+    table.clear(sharedIgnoreList)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            table.insert(sharedIgnoreList, player.Character)
+        end
+    end
+    
     local triggerRayParams = RaycastParams.new()
     triggerRayParams.IgnoreWater = true
-    local result = nil
+    triggerRayParams.FilterType = Enum.RaycastFilterType.Include
+    triggerRayParams.FilterDescendantsInstances = sharedIgnoreList
 
-    if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
-        triggerRayParams.FilterType = Enum.RaycastFilterType.Exclude
-        local ignoreList = {LocalPlayer.Character, Camera}
-        triggerRayParams.FilterDescendantsInstances = ignoreList
-        
-        result = Workspace:Raycast(origin, direction, triggerRayParams)
-        
-        -- Ignore parts we cannot collide with
-        while result and not result.Instance.CanCollide do
-            table.insert(ignoreList, result.Instance)
-            triggerRayParams.FilterDescendantsInstances = ignoreList
-            result = Workspace:Raycast(origin, direction, triggerRayParams)
-        end
-    else
-        triggerRayParams.FilterType = Enum.RaycastFilterType.Include
-        local characters = {}
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                table.insert(characters, player.Character)
-            end
-        end
-        triggerRayParams.FilterDescendantsInstances = characters
-        result = Workspace:Raycast(origin, direction, triggerRayParams)
-    end
+    local result = Workspace:Raycast(origin, direction, triggerRayParams)
 
     if result and result.Instance then
         local targetCharacter = result.Instance:FindFirstAncestorOfClass("Model")
@@ -231,11 +286,18 @@ local function CheckTriggerBot(mousePos)
 
                 local humanoid = targetCharacter:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 then
-                    if tick() - lastTrigger >= Rayflare.Settings.TriggerBot.Delay then
-                        lastTrigger = tick()
-                        if mouse1press then pcall(mouse1press) end
-                        if mouse1release then pcall(mouse1release) end
-                        if mouse1click then pcall(mouse1click) end
+                    local isVisible = true
+                    if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
+                        isVisible = CheckVisibility(result.Instance, targetCharacter)
+                    end
+                    
+                    if isVisible then
+                        if tick() - lastTrigger >= Rayflare.Settings.TriggerBot.Delay then
+                            lastTrigger = tick()
+                            if mouse1press then pcall(mouse1press) end
+                            if mouse1release then pcall(mouse1release) end
+                            if mouse1click then pcall(mouse1click) end
+                        end
                     end
                 end
             end
@@ -287,8 +349,9 @@ function Rayflare:Load()
     self.Connections.RenderLoop = RunService.RenderStepped:Connect(function(deltaTime)
         local mousePos = UserInputService:GetMouseLocation()
 
+        -- Hide circle if 360 FOV is active
         if self.FOVCircle then
-            if self.Settings.Enabled and self.Settings.FOV.Visible then
+            if self.Settings.Enabled and self.Settings.FOV.Visible and not self.Settings.FOV.Full360 then
                 self.FOVCircle.Visible = true
                 self.FOVCircle.Transparency = 1
                 self.FOVCircle.Radius = self.Settings.FOV.Radius
@@ -319,7 +382,6 @@ function Rayflare:Load()
 
         local shouldAim = (self.Settings.Trigger.TriggerMode == "Always") or self.Settings.Trigger.IsAiming
         
-        -- Reset mechanism for Flick
         if not shouldAim then
             if self.wasAiming then
                 if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
@@ -333,10 +395,10 @@ function Rayflare:Load()
             return
         end
 
-        -- Find Target
         if self.Settings.TargetLock and self.CurrentTarget then
             local isValid = IsValidTarget(self.CurrentTarget, mousePos)
-            if not isValid then
+            local targetPart = self.CurrentTarget.Character and self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
+            if not isValid or not (targetPart and CheckVisibility(targetPart, self.CurrentTarget.Character)) then
                 self.CurrentTarget = GetClosestTarget(mousePos)
             end
         else
@@ -344,7 +406,6 @@ function Rayflare:Load()
         end
         
         if self.CurrentTarget and self.CurrentTarget.Character then
-            -- Save camera position right before the lock initiates
             if not self.wasAiming then
                 self.savedCameraCFrame = Camera.CFrame
                 self.wasAiming = true
@@ -392,7 +453,6 @@ function Rayflare:Load()
                 end
             end
         else
-            -- If user is holding aim but the target drops behind a wall, trigger flick return
             if self.wasAiming then
                 if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
                     Camera.CFrame = self.savedCameraCFrame
