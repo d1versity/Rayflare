@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.8
+-- Rayflare by Vhyse | v2.9
 
 local Rayflare = {
     Settings = {
@@ -34,7 +34,7 @@ local Rayflare = {
             Radius = 150,
             Color = Color3.fromRGB(255, 255, 255),
             Chroma = false,
-            Full360 = false -- 360 Degree FOV Switch
+            Full360 = false
         },
         
         TeamCheck = {
@@ -98,17 +98,16 @@ Rayflare.RayParams.IgnoreWater = true
 Rayflare.RevRayParams.FilterType = Enum.RaycastFilterType.Exclude
 Rayflare.RevRayParams.IgnoreWater = true
 
--- Reusable buffer table to avoid GC overhead
 local sharedIgnoreList = {}
 
+-- Returns: isVisible, isPenetrating
 local function CheckVisibility(targetPart, character)
-    if not Rayflare.Settings.WallCheck.Enabled then return true end
-    if not LocalPlayer.Character then return false end
+    if not Rayflare.Settings.WallCheck.Enabled then return true, false end
+    if not LocalPlayer.Character then return false, false end
     
     local origin = Camera.CFrame.Position
     local direction = targetPart.Position - origin
     
-    -- Fast buffer clear
     table.clear(sharedIgnoreList)
     sharedIgnoreList[1] = LocalPlayer.Character
     sharedIgnoreList[2] = character
@@ -116,7 +115,6 @@ local function CheckVisibility(targetPart, character)
     Rayflare.RayParams.FilterDescendantsInstances = sharedIgnoreList
     local result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
     
-    -- Filter non-collidable parts quickly
     local safety = 0
     while result and not result.Instance.CanCollide and safety < 10 do
         safety = safety + 1
@@ -125,22 +123,18 @@ local function CheckVisibility(targetPart, character)
         result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
     end
     
-    -- Front ray hit a solid wall
     if result then
         if Rayflare.Settings.AutoWall and Rayflare.Settings.AutoWall.Enabled then
             local maxThick = Rayflare.Settings.AutoWall.MaxThickness
             local dirUnit = direction.Unit
             
-            -- Early exit test: sample max penetration depth ahead of the front hit
             local samplePos = result.Position + (dirUnit * (maxThick + 0.05))
             local distToTarget = (targetPart.Position - result.Position).Magnitude
             
-            -- If the target is closer than the wall penetration sample, target is inside the wall
             if distToTarget < maxThick then
                 samplePos = targetPart.Position
             end
             
-            -- Cast backwards from sample point toward the front hit
             Rayflare.RevRayParams.FilterDescendantsInstances = sharedIgnoreList
             local revDir = result.Position - samplePos
             local revResult = Workspace:Raycast(samplePos, revDir, Rayflare.RevRayParams)
@@ -156,14 +150,14 @@ local function CheckVisibility(targetPart, character)
             if revResult then
                 local thickness = (result.Position - revResult.Position).Magnitude
                 if thickness <= maxThick then
-                    return true
+                    return true, true -- Target is visible via penetration
                 end
             end
         end
-        return false
+        return false, false
     end
     
-    return true
+    return true, false
 end
 
 local function IsValidTarget(player, mousePos)
@@ -178,14 +172,11 @@ local function IsValidTarget(player, mousePos)
         return false 
     end
     
-    -- 360 Degree FOV Evaluation
     if Rayflare.Settings.FOV.Full360 then
-        -- In 360 FOV, calculate direct world distance from the camera
         local dist3D = (targetPart.Position - Camera.CFrame.Position).Magnitude
         return true, dist3D, targetPart
     end
     
-    -- Standard 2D Viewport Evaluation
     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
     if not onScreen then return false end
     
@@ -199,7 +190,6 @@ local function GetClosestTarget(mousePos)
     local closestPlayer = nil
     local shortestDistance = math.huge
 
-    -- 1. Cheap loop: Find candidate by distance only
     for _, player in ipairs(Players:GetPlayers()) do
         local isValid, dist = IsValidTarget(player, mousePos)
         if isValid and dist < shortestDistance then
@@ -208,11 +198,13 @@ local function GetClosestTarget(mousePos)
         end
     end
     
-    -- 2. Expensive check: Only raycast against the single closest candidate
     if closestPlayer and closestPlayer.Character then
         local targetPart = closestPlayer.Character:FindFirstChild(Rayflare.Settings.AimPart)
-        if targetPart and CheckVisibility(targetPart, closestPlayer.Character) then
-            return closestPlayer
+        if targetPart then
+            local isVis, isPen = CheckVisibility(targetPart, closestPlayer.Character)
+            if isVis then
+                return closestPlayer
+            end
         end
     end
     
@@ -288,7 +280,7 @@ local function CheckTriggerBot(mousePos)
                 if humanoid and humanoid.Health > 0 then
                     local isVisible = true
                     if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
-                        isVisible = CheckVisibility(result.Instance, targetCharacter)
+                        isVisible, _ = CheckVisibility(result.Instance, targetCharacter)
                     end
                     
                     if isVisible then
@@ -349,7 +341,6 @@ function Rayflare:Load()
     self.Connections.RenderLoop = RunService.RenderStepped:Connect(function(deltaTime)
         local mousePos = UserInputService:GetMouseLocation()
 
-        -- Hide circle if 360 FOV is active
         if self.FOVCircle then
             if self.Settings.Enabled and self.Settings.FOV.Visible and not self.Settings.FOV.Full360 then
                 self.FOVCircle.Visible = true
@@ -398,7 +389,12 @@ function Rayflare:Load()
         if self.Settings.TargetLock and self.CurrentTarget then
             local isValid = IsValidTarget(self.CurrentTarget, mousePos)
             local targetPart = self.CurrentTarget.Character and self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
-            if not isValid or not (targetPart and CheckVisibility(targetPart, self.CurrentTarget.Character)) then
+            if targetPart then
+                local isVis, isPen = CheckVisibility(targetPart, self.CurrentTarget.Character)
+                if not isValid or not isVis then
+                    self.CurrentTarget = GetClosestTarget(mousePos)
+                end
+            else
                 self.CurrentTarget = GetClosestTarget(mousePos)
             end
         else
@@ -413,6 +409,18 @@ function Rayflare:Load()
             
             local targetPart = self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
             if not targetPart then return end
+            
+            local isVis, isPen = CheckVisibility(targetPart, self.CurrentTarget.Character)
+            
+            -- Auto-Wall automatic firing
+            if self.Settings.AutoWall.Enabled and isPen then
+                if tick() - lastTrigger >= 0.05 then
+                    lastTrigger = tick()
+                    if mouse1press then pcall(mouse1press) end
+                    if mouse1release then pcall(mouse1release) end
+                    if mouse1click then pcall(mouse1click) end
+                end
+            end
             
             local predictedPos = GetPredictedPosition(targetPart)
             
