@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.9
+-- Rayflare by Vhyse | v2.9.1
 
 local Rayflare = {
     Settings = {
@@ -76,6 +76,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -99,6 +100,28 @@ Rayflare.RevRayParams.FilterType = Enum.RaycastFilterType.Exclude
 Rayflare.RevRayParams.IgnoreWater = true
 
 local sharedIgnoreList = {}
+
+-- Highly reliable universal click simulation
+local function SimulateClick()
+    -- 1. Virtual Input Manager (Engine-level injection)
+    pcall(function()
+        local center = Camera.ViewportSize / 2
+        VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+        task.delay(0.015, function()
+            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+        end)
+    end)
+    
+    -- 2. Standard Executor Fallbacks
+    pcall(function()
+        if mouse1click then 
+            mouse1click() 
+        elseif mouse1press and mouse1release then
+            mouse1press()
+            task.delay(0.015, function() mouse1release() end)
+        end
+    end)
+end
 
 -- Returns: isVisible, isPenetrating
 local function CheckVisibility(targetPart, character)
@@ -286,9 +309,7 @@ local function CheckTriggerBot(mousePos)
                     if isVisible then
                         if tick() - lastTrigger >= Rayflare.Settings.TriggerBot.Delay then
                             lastTrigger = tick()
-                            if mouse1press then pcall(mouse1press) end
-                            if mouse1release then pcall(mouse1release) end
-                            if mouse1click then pcall(mouse1click) end
+                            SimulateClick()
                         end
                     end
                 end
@@ -416,9 +437,7 @@ function Rayflare:Load()
             if self.Settings.AutoWall.Enabled and isPen then
                 if tick() - lastTrigger >= 0.05 then
                     lastTrigger = tick()
-                    if mouse1press then pcall(mouse1press) end
-                    if mouse1release then pcall(mouse1release) end
-                    if mouse1click then pcall(mouse1click) end
+                    SimulateClick()
                 end
             end
             
