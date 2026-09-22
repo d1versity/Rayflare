@@ -1,4 +1,4 @@
--- Rayflare by Vhyse | v2.9.1
+-- Rayflare by Vhyse | v3.0
 
 local Rayflare = {
     Settings = {
@@ -33,8 +33,7 @@ local Rayflare = {
             Visible = true,
             Radius = 150,
             Color = Color3.fromRGB(255, 255, 255),
-            Chroma = false,
-            Full360 = false
+            Chroma = false
         },
         
         TeamCheck = {
@@ -43,11 +42,6 @@ local Rayflare = {
         
         WallCheck = {
             Enabled = false
-        },
-        
-        AutoWall = {
-            Enabled = false,
-            MaxThickness = 2 
         },
         
         Prediction = {
@@ -66,7 +60,6 @@ local Rayflare = {
     CurrentTarget = nil,
     FOVCircle = nil,
     RayParams = RaycastParams.new(),
-    RevRayParams = RaycastParams.new(),
     
     wasAiming = false,
     savedCameraCFrame = nil
@@ -96,37 +89,31 @@ end
 Rayflare.RayParams.FilterType = Enum.RaycastFilterType.Exclude
 Rayflare.RayParams.IgnoreWater = true
 
-Rayflare.RevRayParams.FilterType = Enum.RaycastFilterType.Exclude
-Rayflare.RevRayParams.IgnoreWater = true
-
 local sharedIgnoreList = {}
 
--- Highly reliable universal click simulation
+-- Safe hardware click simulation on a separate thread
 local function SimulateClick()
-    -- 1. Virtual Input Manager (Engine-level injection)
-    pcall(function()
-        local center = Camera.ViewportSize / 2
-        VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
-        task.delay(0.015, function()
-            VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
-        end)
-    end)
-    
-    -- 2. Standard Executor Fallbacks
-    pcall(function()
-        if mouse1click then 
-            mouse1click() 
-        elseif mouse1press and mouse1release then
+    task.spawn(function()
+        if mouse1press and mouse1release then
             mouse1press()
-            task.delay(0.015, function() mouse1release() end)
+            task.wait(0.03)
+            mouse1release()
+        elseif mouse1click then
+            mouse1click()
+        else
+            pcall(function()
+                local center = Camera.ViewportSize / 2
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+                task.wait(0.03)
+                VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+            end)
         end
     end)
 end
 
--- Returns: isVisible, isPenetrating
 local function CheckVisibility(targetPart, character)
-    if not Rayflare.Settings.WallCheck.Enabled then return true, false end
-    if not LocalPlayer.Character then return false, false end
+    if not Rayflare.Settings.WallCheck.Enabled then return true end
+    if not LocalPlayer.Character then return false end
     
     local origin = Camera.CFrame.Position
     local direction = targetPart.Position - origin
@@ -146,41 +133,7 @@ local function CheckVisibility(targetPart, character)
         result = Workspace:Raycast(origin, direction, Rayflare.RayParams)
     end
     
-    if result then
-        if Rayflare.Settings.AutoWall and Rayflare.Settings.AutoWall.Enabled then
-            local maxThick = Rayflare.Settings.AutoWall.MaxThickness
-            local dirUnit = direction.Unit
-            
-            local samplePos = result.Position + (dirUnit * (maxThick + 0.05))
-            local distToTarget = (targetPart.Position - result.Position).Magnitude
-            
-            if distToTarget < maxThick then
-                samplePos = targetPart.Position
-            end
-            
-            Rayflare.RevRayParams.FilterDescendantsInstances = sharedIgnoreList
-            local revDir = result.Position - samplePos
-            local revResult = Workspace:Raycast(samplePos, revDir, Rayflare.RevRayParams)
-            
-            local revSafety = 0
-            while revResult and not revResult.Instance.CanCollide and revSafety < 10 do
-                revSafety = revSafety + 1
-                table.insert(sharedIgnoreList, revResult.Instance)
-                Rayflare.RevRayParams.FilterDescendantsInstances = sharedIgnoreList
-                revResult = Workspace:Raycast(samplePos, revDir, Rayflare.RevRayParams)
-            end
-            
-            if revResult then
-                local thickness = (result.Position - revResult.Position).Magnitude
-                if thickness <= maxThick then
-                    return true, true -- Target is visible via penetration
-                end
-            end
-        end
-        return false, false
-    end
-    
-    return true, false
+    return not result
 end
 
 local function IsValidTarget(player, mousePos)
@@ -193,11 +146,6 @@ local function IsValidTarget(player, mousePos)
     
     if Rayflare.Settings.TeamCheck.Enabled and LocalPlayer.Team and player.Team == LocalPlayer.Team then 
         return false 
-    end
-    
-    if Rayflare.Settings.FOV.Full360 then
-        local dist3D = (targetPart.Position - Camera.CFrame.Position).Magnitude
-        return true, dist3D, targetPart
     end
     
     local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
@@ -224,7 +172,7 @@ local function GetClosestTarget(mousePos)
     if closestPlayer and closestPlayer.Character then
         local targetPart = closestPlayer.Character:FindFirstChild(Rayflare.Settings.AimPart)
         if targetPart then
-            local isVis, isPen = CheckVisibility(targetPart, closestPlayer.Character)
+            local isVis = CheckVisibility(targetPart, closestPlayer.Character)
             if isVis then
                 return closestPlayer
             end
@@ -303,7 +251,7 @@ local function CheckTriggerBot(mousePos)
                 if humanoid and humanoid.Health > 0 then
                     local isVisible = true
                     if Rayflare.Settings.TriggerBot.WallCheck.Enabled then
-                        isVisible, _ = CheckVisibility(result.Instance, targetCharacter)
+                        isVisible = CheckVisibility(result.Instance, targetCharacter)
                     end
                     
                     if isVisible then
@@ -363,7 +311,7 @@ function Rayflare:Load()
         local mousePos = UserInputService:GetMouseLocation()
 
         if self.FOVCircle then
-            if self.Settings.Enabled and self.Settings.FOV.Visible and not self.Settings.FOV.Full360 then
+            if self.Settings.Enabled and self.Settings.FOV.Visible then
                 self.FOVCircle.Visible = true
                 self.FOVCircle.Transparency = 1
                 self.FOVCircle.Radius = self.Settings.FOV.Radius
@@ -411,7 +359,7 @@ function Rayflare:Load()
             local isValid = IsValidTarget(self.CurrentTarget, mousePos)
             local targetPart = self.CurrentTarget.Character and self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
             if targetPart then
-                local isVis, isPen = CheckVisibility(targetPart, self.CurrentTarget.Character)
+                local isVis = CheckVisibility(targetPart, self.CurrentTarget.Character)
                 if not isValid or not isVis then
                     self.CurrentTarget = GetClosestTarget(mousePos)
                 end
@@ -430,16 +378,6 @@ function Rayflare:Load()
             
             local targetPart = self.CurrentTarget.Character:FindFirstChild(self.Settings.AimPart)
             if not targetPart then return end
-            
-            local isVis, isPen = CheckVisibility(targetPart, self.CurrentTarget.Character)
-            
-            -- Auto-Wall automatic firing
-            if self.Settings.AutoWall.Enabled and isPen then
-                if tick() - lastTrigger >= 0.05 then
-                    lastTrigger = tick()
-                    SimulateClick()
-                end
-            end
             
             local predictedPos = GetPredictedPosition(targetPart)
             
