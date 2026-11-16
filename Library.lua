@@ -1,10 +1,10 @@
--- Rayflare by Vhyse | v3.0
+-- Rayflare by Vhyse | v3.1
 
 local Rayflare = {
     Settings = {
         Enabled = false,
         AimPart = "Head", 
-        AimType = "Camera", 
+        AimType = "Camera",
         Smoothness = 5, 
         TargetLock = true, 
         
@@ -27,6 +27,11 @@ local Rayflare = {
             WallCheck = {
                 Enabled = false
             }
+        },
+        
+        SilentAim = {
+            Enabled = true,
+            HitChance = 100 -- Percentage (1 to 100)
         },
 
         FOV = {
@@ -62,7 +67,8 @@ local Rayflare = {
     RayParams = RaycastParams.new(),
     
     wasAiming = false,
-    savedCameraCFrame = nil
+    savedCameraCFrame = nil,
+    hooksLoaded = false
 }
 
 local Players = game:GetService("Players")
@@ -266,8 +272,85 @@ local function CheckTriggerBot(mousePos)
     end
 end
 
+-- ==========================================
+-- SILENT AIM HOOKS
+-- ==========================================
+local oldNamecall
+local oldIndex
+
+local function InitHooks()
+    if Rayflare.hooksLoaded then return end
+    
+    if not hookmetamethod then
+        warn("[ Rayflare ] Executor does not support hookmetamethod. Silent Aim is disabled.")
+        return
+    end
+
+    -- Hooking Namecall (Intercepts Raycast & FindPartOnRay)
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+
+        if Rayflare.Settings.Enabled and Rayflare.Settings.SilentAim.Enabled and Rayflare.CurrentTarget then
+            local shouldAim = (Rayflare.Settings.Trigger.TriggerMode == "Always") or Rayflare.Settings.Trigger.IsAiming
+            
+            if shouldAim and math.random(1, 100) <= Rayflare.Settings.SilentAim.HitChance then
+                local targetPart = Rayflare.CurrentTarget.Character and Rayflare.CurrentTarget.Character:FindFirstChild(Rayflare.Settings.AimPart)
+                
+                if targetPart then
+                    local predictedPos = GetPredictedPosition(targetPart)
+
+                    if method == "Raycast" and self == Workspace then
+                        local origin = args[1]
+                        local direction = (predictedPos - origin).Unit * (args[2].Magnitude)
+                        args[2] = direction
+                        return oldNamecall(self, unpack(args))
+                    end
+
+                    if (method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist") and self == Workspace then
+                        local origin = args[1].Origin
+                        local direction = (predictedPos - origin).Unit * (args[1].Direction.Magnitude)
+                        args[1] = Ray.new(origin, direction)
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
+        end
+
+        return oldNamecall(self, ...)
+    end))
+
+    -- Hooking Index (Intercepts Mouse.Hit & Mouse.Target)
+    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+        if Rayflare.Settings.Enabled and Rayflare.Settings.SilentAim.Enabled and Rayflare.CurrentTarget then
+            local shouldAim = (Rayflare.Settings.Trigger.TriggerMode == "Always") or Rayflare.Settings.Trigger.IsAiming
+            
+            if shouldAim and math.random(1, 100) <= Rayflare.Settings.SilentAim.HitChance then
+                local targetPart = Rayflare.CurrentTarget.Character and Rayflare.CurrentTarget.Character:FindFirstChild(Rayflare.Settings.AimPart)
+                
+                if targetPart then
+                    local predictedPos = GetPredictedPosition(targetPart)
+
+                    if self == LocalPlayer:GetMouse() then
+                        if key == "Target" then
+                            return targetPart
+                        elseif key == "Hit" then
+                            return CFrame.new(predictedPos)
+                        end
+                    end
+                end
+            end
+        end
+        return oldIndex(self, key)
+    end))
+
+    Rayflare.hooksLoaded = true
+end
+
 function Rayflare:Load()
     if self.Connections.RenderLoop then return end 
+    
+    InitHooks() -- Start Silent Aim hooks
     
     self.Connections.InputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
@@ -344,7 +427,7 @@ function Rayflare:Load()
         
         if not shouldAim then
             if self.wasAiming then
-                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
+                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" and not self.Settings.SilentAim.Enabled then
                     Camera.CFrame = self.savedCameraCFrame
                 end
                 self.wasAiming = false
@@ -381,7 +464,10 @@ function Rayflare:Load()
             
             local predictedPos = GetPredictedPosition(targetPart)
             
-            if self.Settings.AimType == "Camera" then
+            -- If Silent Aim is enabled, we bypass visual Camera/Cursor aiming
+            if self.Settings.SilentAim.Enabled then
+                -- Do nothing visually, the hooks will intercept the game's actual shooting requests.
+            elseif self.Settings.AimType == "Camera" then
                 local currentCFrame = Camera.CFrame
                 local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
                 
@@ -419,7 +505,7 @@ function Rayflare:Load()
             end
         else
             if self.wasAiming then
-                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" then
+                if self.Settings.Flick.Enabled and self.savedCameraCFrame and self.Settings.AimType == "Camera" and not self.Settings.SilentAim.Enabled then
                     Camera.CFrame = self.savedCameraCFrame
                 end
                 self.wasAiming = false
